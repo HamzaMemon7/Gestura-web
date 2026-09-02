@@ -2,82 +2,125 @@
 
 const express = require('express');
 
-const db = require('../db');
+const supabase = require('../db');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
 router.use(authenticate);
 
-/**
- * POST /api/sentences
- * Any authenticated user. Body: { text }
- */
-router.post('/', (req, res) => {
+/*
+POST /api/sentences
+*/
+router.post('/', async (req, res) => {
   try {
     const { text } = req.body || {};
 
-    if (typeof text !== 'string' || !text.trim()) {
-      return res.status(400).json({ error: 'text must be a non-empty string' });
+    if (
+      typeof text !== 'string' ||
+      !text.trim()
+    ) {
+      return res.status(400).json({
+        error: 'text must be a non-empty string'
+      });
     }
 
-    const normalizedText = text.trim();
-    const result = db
-      .prepare('INSERT INTO sentences (user_id, text) VALUES (?, ?)')
-      .run(req.user.id, normalizedText);
-    const sentence = db
-      .prepare('SELECT id, user_id, text, created_at FROM sentences WHERE id = ?')
-      .get(result.lastInsertRowid);
+    const { data: sentence, error } = await supabase
+      .from('sentences')
+      .insert({
+        user_id: req.user.id,
+        text: text.trim()
+      })
+      .select('id, user_id, text, created_at')
+      .single();
 
-    return res.status(201).json({ sentence });
+    if (error) {
+      throw error;
+    }
+
+    return res.status(201).json({
+      sentence
+    });
+
   } catch (err) {
     console.error('[sentences/create]', err);
-    return res.status(500).json({ error: 'Failed to create sentence' });
+
+    return res.status(500).json({
+      error: 'Failed to create sentence'
+    });
   }
 });
 
-/**
- * GET /api/sentences
- * Any authenticated user.
- */
-router.get('/', (req, res) => {
+/*
+GET /api/sentences
+*/
+router.get('/', async (req, res) => {
   try {
-    const sentences = db
-      .prepare(
-        'SELECT id, user_id, text, created_at FROM sentences WHERE user_id = ? ORDER BY created_at DESC'
-      )
-      .all(req.user.id);
+    const { data: sentences, error } = await supabase
+      .from('sentences')
+      .select('id, user_id, text, created_at')
+      .eq('user_id', req.user.id)
+      .order('created_at', {
+        ascending: false
+      });
 
-    return res.json({ sentences });
-  } catch (err) {
-    console.error('[sentences/list]', err);
-    return res.status(500).json({ error: 'Failed to load sentences' });
-  }
-});
-
-/**
- * DELETE /api/sentences/:id
- * Any authenticated user.
- */
-router.delete('/:id', (req, res) => {
-  try {
-    const sentence = db
-      .prepare('SELECT id FROM sentences WHERE id = ? AND user_id = ?')
-      .get(req.params.id, req.user.id);
-
-    if (!sentence) {
-      return res.status(404).json({ error: 'Sentence not found' });
+    if (error) {
+      throw error;
     }
 
-    db.prepare('DELETE FROM sentences WHERE id = ? AND user_id = ?').run(
-      req.params.id,
-      req.user.id
-    );
+    return res.json({
+      sentences
+    });
 
-    return res.json({ message: 'Sentence deleted' });
+  } catch (err) {
+    console.error('[sentences/list]', err);
+
+    return res.status(500).json({
+      error: 'Failed to load sentences'
+    });
+  }
+});
+
+/*
+DELETE /api/sentences/:id
+*/
+router.delete('/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        error: 'Invalid sentence id'
+      });
+    }
+
+    const { data, error } = await supabase
+      .from('sentences')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', req.user.id)
+      .select('id');
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({
+        error: 'Sentence not found'
+      });
+    }
+
+    return res.json({
+      message: 'Sentence deleted'
+    });
+
   } catch (err) {
     console.error('[sentences/delete]', err);
-    return res.status(500).json({ error: 'Failed to delete sentence' });
+
+    return res.status(500).json({
+      error: 'Failed to delete sentence'
+    });
   }
 });
 

@@ -4,7 +4,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-const db = require('../db');
+const supabase = require('../db');
 const { authenticate, getJwtSecret } = require('../middleware/auth');
 
 const router = express.Router();
@@ -14,9 +14,15 @@ const TOKEN_TTL = '7d';
 
 function signToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role
+    },
     getJwtSecret(),
-    { expiresIn: TOKEN_TTL }
+    {
+      expiresIn: TOKEN_TTL
+    }
   );
 }
 
@@ -25,105 +31,167 @@ function publicUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
-    role: user.role,
+    role: user.role
   };
 }
 
-/**
- * POST /api/auth/register
- * Body: { name, email, password }
- */
-router.post('/register', (req, res) => {
+/*
+POST /api/auth/register
+*/
+router.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body || {};
 
     if (!name || !email || !password) {
-      return res.status(400).json({ error: 'name, email and password are required' });
+      return res.status(400).json({
+        error: 'name, email and password are required'
+      });
     }
 
-    const normalizedEmail = String(email).trim().toLowerCase();
+    const normalizedEmail = String(email)
+      .trim()
+      .toLowerCase();
 
-    const existing = db
-      .prepare('SELECT id FROM users WHERE email = ?')
-      .get(normalizedEmail);
+    const { data: existingUser, error: existingError } =
+      await supabase
+        .from('users')
+        .select('id')
+        .eq('email', normalizedEmail)
+        .maybeSingle();
 
-    if (existing) {
-      return res.status(409).json({ error: 'Email already registered' });
+    if (existingError) {
+      throw existingError;
     }
 
-    const passwordHash = bcrypt.hashSync(String(password), SALT_ROUNDS);
+    if (existingUser) {
+      return res.status(409).json({
+        error: 'Email already registered'
+      });
+    }
 
-    const result = db
-      .prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)')
-      .run(String(name).trim(), normalizedEmail, passwordHash, 'USER');
+    const passwordHash = await bcrypt.hash(
+      String(password),
+      SALT_ROUNDS
+    );
 
-    const user = {
-      id: Number(result.lastInsertRowid),
-      name: String(name).trim(),
-      email: normalizedEmail,
-      role: 'USER',
-    };
+    const { data: user, error } = await supabase
+      .from('users')
+      .insert({
+        name: String(name).trim(),
+        email: normalizedEmail,
+        password_hash: passwordHash,
+        role: 'USER'
+      })
+      .select('id, name, email, role')
+      .single();
 
-    return res.status(201).json({ token: signToken(user), user: publicUser(user) });
+    if (error) {
+      throw error;
+    }
+
+    return res.status(201).json({
+      token: signToken(user),
+      user: publicUser(user)
+    });
+
   } catch (err) {
     console.error('[auth/register]', err);
-    return res.status(500).json({ error: 'Failed to register user' });
+
+    return res.status(500).json({
+      error: 'Failed to register user'
+    });
   }
 });
 
-/**
- * POST /api/auth/login
- * Body: { email, password }
- */
-router.post('/login', (req, res) => {
+/*
+POST /api/auth/login
+*/
+router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
 
     if (!email || !password) {
-      return res.status(400).json({ error: 'email and password are required' });
+      return res.status(400).json({
+        error: 'email and password are required'
+      });
     }
 
-    const normalizedEmail = String(email).trim().toLowerCase();
+    const normalizedEmail = String(email)
+      .trim()
+      .toLowerCase();
 
-    const user = db
-      .prepare('SELECT id, name, email, password_hash, role FROM users WHERE email = ?')
-      .get(normalizedEmail);
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, name, email, password_hash, role')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
 
     if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({
+        error: 'Invalid credentials'
+      });
     }
 
-    const passwordMatches = bcrypt.compareSync(String(password), user.password_hash);
+    const passwordMatches = await bcrypt.compare(
+      String(password),
+      user.password_hash
+    );
 
     if (!passwordMatches) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({
+        error: 'Invalid credentials'
+      });
     }
 
-    return res.json({ token: signToken(user), user: publicUser(user) });
+    return res.json({
+      token: signToken(user),
+      user: publicUser(user)
+    });
+
   } catch (err) {
     console.error('[auth/login]', err);
-    return res.status(500).json({ error: 'Failed to log in' });
+
+    return res.status(500).json({
+      error: 'Failed to log in'
+    });
   }
 });
 
-/**
- * GET /api/auth/me
- * Headers: Authorization: Bearer <token>
- */
-router.get('/me', authenticate, (req, res) => {
+/*
+GET /api/auth/me
+*/
+router.get('/me', authenticate, async (req, res) => {
   try {
-    const user = db
-      .prepare('SELECT id, name, email, role FROM users WHERE id = ?')
-      .get(req.user.id);
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, name, email, role')
+      .eq('id', req.user.id)
+      .maybeSingle();
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+    if (error) {
+      throw error;
     }
 
-    return res.json({ user: publicUser(user) });
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    return res.json({
+      user: publicUser(user)
+    });
+
   } catch (err) {
     console.error('[auth/me]', err);
-    return res.status(500).json({ error: 'Failed to load current user' });
+
+    return res.status(500).json({
+      error: 'Failed to load current user'
+    });
   }
 });
 

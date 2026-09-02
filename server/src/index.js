@@ -9,9 +9,6 @@ require('dotenv').config({
 const express = require('express');
 const cors = require('cors');
 
-// Initialize database
-require('./db');
-
 const authRoutes = require('./routes/auth');
 const gestureRoutes = require('./routes/gestures');
 const detectionRoutes = require('./routes/detections');
@@ -34,16 +31,15 @@ app.use(express.urlencoded({
   limit: '50mb'
 }));
 
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     service: 'GesturaWeb API',
+    database: 'Supabase',
     time: new Date().toISOString()
   });
 });
 
-// API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/gestures', gestureRoutes);
 app.use('/api/detections', detectionRoutes);
@@ -51,14 +47,12 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/translate', translateRoutes);
 app.use('/api/sentences', sentenceRoutes);
 
-// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     error: `Route not found: ${req.method} ${req.originalUrl}`
   });
 });
 
-// Error handler
 app.use((err, req, res, next) => {
   console.error('[server]', err);
 
