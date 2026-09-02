@@ -9,7 +9,8 @@ require('dotenv').config({
 const express = require('express');
 const cors = require('cors');
 
-const db = require('./db');
+// Initialize database
+require('./db');
 
 const authRoutes = require('./routes/auth');
 const gestureRoutes = require('./routes/gestures');
@@ -20,10 +21,20 @@ const sentenceRoutes = require('./routes/sentences');
 
 const app = express();
 
-app.use(cors({ origin: '*' }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(cors({
+  origin: '*'
+}));
 
+app.use(express.json({
+  limit: '50mb'
+}));
+
+app.use(express.urlencoded({
+  extended: true,
+  limit: '50mb'
+}));
+
+// Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -32,6 +43,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/gestures', gestureRoutes);
 app.use('/api/detections', detectionRoutes);
@@ -39,12 +51,14 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/translate', translateRoutes);
 app.use('/api/sentences', sentenceRoutes);
 
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     error: `Route not found: ${req.method} ${req.originalUrl}`
   });
 });
 
+// Error handler
 app.use((err, req, res, next) => {
   console.error('[server]', err);
 
